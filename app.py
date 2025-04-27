@@ -66,13 +66,26 @@ capital = st.number_input(TXT["capital"], min_value=10.0, value=100.0, step=10.0
 leverage = st.selectbox(TXT["leverage"], [1, 2, 5, 10, 20, 50], index=2 if mode == "Futures" else 0)
 # تحميل بيانات العملة
 def fetch_data(symbol, interval, limit):
-    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
-    data = requests.get(url).json()
-    df = pd.DataFrame(data, columns=["time", "open", "high", "low", "close", "volume",
-                                     "close_time", "qav", "trades", "tbbav", "tbqav", "ignore"])
-    df["time"] = pd.to_datetime(df["time"], unit="ms")
-    df[["open", "high", "low", "close", "volume"]] = df[["open", "high", "low", "close", "volume"]].astype(float)
-    return df
+    try:
+        url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
+        response = requests.get(url, timeout=10)  # مهلة الانتظار 10 ثواني
+        response.raise_for_status()  # لو في خطأ HTTP يعطي خطأ واضح
+        data = response.json()
+
+        # تحقق إذا البيانات قليلة أو فاضية
+        if not data or len(data) < max(10, limit * 0.5):
+            raise Exception("Not enough candles returned from Binance API.")
+
+        # تجهيز الداتا فريم
+        df = pd.DataFrame(data, columns=["time", "open", "high", "low", "close", "volume",
+                                         "close_time", "qav", "trades", "tbbav", "tbqav", "ignore"])
+        df["time"] = pd.to_datetime(df["time"], unit="ms")
+        df[["open", "high", "low", "close", "volume"]] = df[["open", "high", "low", "close", "volume"]].astype(float)
+        return df
+
+    except Exception as e:
+        st.error(f"Error fetching data for {symbol}: {e}")
+        return pd.DataFrame()
 # حساب المؤشرات الفنية
 def compute_rsi(series, period=14):
     delta = series.diff()
