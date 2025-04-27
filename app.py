@@ -2,25 +2,48 @@ import streamlit as st
 import pandas as pd
 import requests
 
-# ---------------------------------
 # إعدادات الصفحة
-# ---------------------------------
-st.set_page_config(page_title="Crypto Analyzer - Binance", layout="wide")
+st.set_page_config(page_title="Crypto Analyzer", layout="wide")
 
-# ---------------------------------
-# الدوال المساعدة
-# ---------------------------------
+# اختيار اللغة
+language = st.radio("Select Language / اختر اللغة:", ("English", "العربية"))
 
+# ترجمة النصوص بناءً على اللغة
+TXT = {
+    "symbol": "Enter Symbol (e.g., BTCUSDT):" if language == "English" else "ادخل رمز العملة (مثلا BTCUSDT):",
+    "mode": "Select Mode:" if language == "English" else "اختر نوع التداول:",
+    "interval": "Select Interval:" if language == "English" else "اختر الفاصل الزمني:",
+    "lookback": "Number of Candles:" if language == "English" else "عدد الشموع:",
+    "capital": "Enter Capital ($):" if language == "English" else "ادخل رأس المال ($):",
+    "leverage": "Select Leverage:" if language == "English" else "اختر الرافعة المالية:",
+    "analyze": "Analyze" if language == "English" else "تحليل",
+    "multi": "Analyze All Timeframes" if language == "English" else "تحليل جميع الفريمات",
+    "signal": "Signal" if language == "English" else "الإشارة",
+    "price": "Price" if language == "English" else "السعر",
+    "sl": "Stop Loss" if language == "English" else "وقف الخسارة",
+    "tp": "Take Profit Targets" if language == "English" else "أهداف الأرباح",
+    "rsi": "RSI" if language == "English" else "مؤشر القوة النسبية",
+    "risk": "Smart Risk %" if language == "English" else "نسبة المخاطرة الذكية",
+    "score": "Trade Score" if language == "English" else "درجة جودة الصفقة",
+    "summary": "Summary Table" if language == "English" else "جدول الملخص"
+}
+
+# خيارات التداول
+mode = st.radio(TXT["mode"], ["Spot", "Futures"])
+symbols = st.text_input(TXT["symbol"], "BTCUSDT").upper().split(",")
+interval = st.selectbox(TXT["interval"], [
+    "1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d", "3d", "1w"
+])
+lookback = st.slider(TXT["lookback"], 50, 500, 100)
+capital = st.number_input(TXT["capital"], min_value=10.0, value=100.0, step=10.0)
+leverage = st.selectbox(TXT["leverage"], [1, 2, 5, 10, 20, 50], index=2 if mode == "Futures" else 0)
+
+# دالة تحميل البيانات من Binance
 def fetch_data(symbol, interval, limit):
     try:
         api_key = st.secrets["BINANCE_API_KEY"]
-
         url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
-
-        headers = {
-            "X-MBX-APIKEY": api_key
-        }
-
+        headers = {"X-MBX-APIKEY": api_key}
         response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
         data = response.json()
@@ -28,17 +51,18 @@ def fetch_data(symbol, interval, limit):
         if not data or len(data) < max(10, limit * 0.5):
             raise Exception("Not enough candles returned from Binance API.")
 
-        df = pd.DataFrame(data, columns=["time", "open", "high", "low", "close", "volume",
-                                         "close_time", "qav", "trades", "tbbav", "tbqav", "ignore"])
+        df = pd.DataFrame(data, columns=[
+            "time", "open", "high", "low", "close", "volume",
+            "close_time", "qav", "trades", "tbbav", "tbqav", "ignore"
+        ])
         df["time"] = pd.to_datetime(df["time"], unit="ms")
         df[["open", "high", "low", "close", "volume"]] = df[["open", "high", "low", "close", "volume"]].astype(float)
         return df
-
     except Exception as e:
         st.error(f"Error fetching data for {symbol}: {e}")
         return pd.DataFrame()
 
-
+# مؤشرات فنية
 def compute_indicators(df):
     df["EMA20"] = df["close"].ewm(span=20, adjust=False).mean()
     df["EMA50"] = df["close"].ewm(span=50, adjust=False).mean()
@@ -71,31 +95,28 @@ def compute_macd(series, fast=12, slow=26, signal=9):
     hist = macd - signal_line
     return macd, signal_line, hist
 
+# كشف الشموع المهمة
 def detect_price_action(df):
     last = df.iloc[-1]
     previous = df.iloc[-2]
-
     if (last["close"] > last["open"] and previous["close"] < previous["open"]
         and last["close"] > previous["open"] and last["open"] < previous["close"]
         and last["volume"] > previous["volume"]):
         return "Bullish Engulfing"
-
     elif (last["close"] < last["open"] and previous["close"] > previous["open"]
         and last["open"] > previous["close"] and last["close"] < previous["open"]
         and last["volume"] > previous["volume"]):
         return "Bearish Engulfing"
-
     elif (last["high"] - last["low"]) > 3 * abs(last["close"] - last["open"]) and \
          (last["close"] - last["low"]) / (last["high"] - last["low"]) > 0.6:
         return "Hammer"
-
     elif abs(last["close"] - last["open"]) <= (last["high"] - last["low"]) * 0.1:
         return "Doji"
-
     return "None"
-
+    
+    # دالة تحليل صفقة واحدة
 def analyze(symbol):
-    df = fetch_data(symbol, "1h", 100)
+    df = fetch_data(symbol, interval, lookback)
     if df.empty or len(df) < 20:
         raise Exception("Not enough data to analyze")
 
@@ -146,6 +167,7 @@ def analyze(symbol):
         "score": min(trade_score, 100)
     }, df
 
+# دالة تحليل جميع الفريمات الزمنية
 def analyze_all_timeframes(symbol):
     timeframes = [
         "1m", "3m", "5m", "15m", "30m",
@@ -200,30 +222,45 @@ def analyze_all_timeframes(symbol):
         st.error("Strong Sell Signal across multiple timeframes!")
     else:
         st.warning("No clear trend: Signals are mixed.")
-
-# ---------------------------------
+        
+        # ---------------------------------
 # واجهة المستخدم
 # ---------------------------------
 
-st.title("تحليل العملات الرقمية - Binance")
+st.title("Crypto Analyzer" if language == "English" else "محلل العملات الرقمية")
 
-symbol = st.text_input("أدخل رمز العملة (مثلاً BTCUSDT):", "BTCUSDT")
+results = []
 
-if st.button("Start Analysis"):
-    try:
-        result, df = analyze(symbol)
-        st.subheader(result["symbol"])
-        st.success(f"Signal: {result['signal']}")
-        st.write(f"Price: {round(result['price'], 4)}")
-        st.write(f"Stop Loss: {round(result['sl'], 4)}")
-        st.write(f"Take Profit 1: {round(result['tp1'], 4)}")
-        st.write(f"Take Profit 2: {round(result['tp2'], 4)}")
-        st.write(f"Take Profit 3: {round(result['tp3'], 4)}")
-        st.write(f"RSI: {round(result['rsi'], 2)}")
-        st.write(f"Risk %: {round(result['risk_pct'], 2)}%")
-        st.write(f"Price Action: {result['pa']}")
-    except Exception as e:
-        st.error(f"Error analyzing {symbol}: {e}")
+# زر التحليل العادي
+if st.button(TXT["analyze"]):
+    for sym in symbols:
+        try:
+            result, df = analyze(sym)
+            results.append(result)
 
-if st.button("Analyze All Timeframes"):
-    analyze_all_timeframes(symbol)
+            st.subheader(f"{sym} - {TXT['signal']}: {result['signal']}")
+            st.write(f"{TXT['price']}: {round(result['price'], 4)}")
+            st.write(f"{TXT['sl']}: {round(result['sl'], 4)}")
+            st.write(f"{TXT['tp']}:")
+            st.write(f"• TP1: {round(result['tp1'], 4)}")
+            st.write(f"• TP2: {round(result['tp2'], 4)}")
+            st.write(f"• TP3: {round(result['tp3'], 4)}")
+            st.write(f"{TXT['rsi']}: {round(result['rsi'], 2)}")
+            st.write(f"{TXT['risk']}: {round(result['risk_pct'], 2)}%")
+            st.write(f"Price Action: {result['pa']}")
+            st.write(f"{TXT['score']}: {result['score']}%")
+            st.markdown("---")
+
+        except Exception as e:
+            st.error(f"Error analyzing {sym}: {e}")
+
+# زر تحليل جميع الفريمات الزمنية
+if st.button(TXT["multi"]):
+    for sym in symbols:
+        analyze_all_timeframes(sym)
+
+# عرض جدول ملخص لكل العملات التي تم تحليلها
+if results:
+    df_results = pd.DataFrame(results)
+    st.subheader(TXT["summary"])
+    st.dataframe(df_results)
