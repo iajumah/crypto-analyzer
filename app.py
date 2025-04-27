@@ -111,34 +111,51 @@ def compute_indicators(df):
 def detect_price_action(df):
     last = df.iloc[-1]
     previous = df.iloc[-2]
-    if last["close"] > last["open"] and previous["close"] < previous["open"] and last["close"] > previous["open"] and last["open"] < previous["close"]:
+    
+    # كشف شمعة Bullish Engulfing مع حجم جيد
+    if (last["close"] > last["open"] and previous["close"] < previous["open"] 
+        and last["close"] > previous["open"] and last["open"] < previous["close"]
+        and last["volume"] > previous["volume"]):
         return "Bullish Engulfing"
-    elif last["close"] < last["open"] and previous["close"] > previous["open"] and last["open"] > previous["close"] and last["close"] < previous["open"]:
+    
+    # كشف شمعة Bearish Engulfing مع حجم جيد
+    elif (last["close"] < last["open"] and previous["close"] > previous["open"]
+        and last["open"] > previous["close"] and last["close"] < previous["open"]
+        and last["volume"] > previous["volume"]):
         return "Bearish Engulfing"
-    elif (last["high"] - last["low"]) > 3 * abs(last["close"] - last["open"]) and (last["close"] - last["low"]) / (last["high"] - last["low"]) > 0.6:
+    
+    # كشف شمعة Hammer دقيقة
+    elif (last["high"] - last["low"]) > 3 * abs(last["close"] - last["open"]) and \
+         (last["close"] - last["low"]) / (last["high"] - last["low"]) > 0.6:
         return "Hammer"
-    elif abs(last["close"] - last["open"]) < (last["high"] - last["low"]) * 0.1:
+    
+    # كشف شمعة Doji قوية
+    elif abs(last["close"] - last["open"]) <= (last["high"] - last["low"]) * 0.1:
         return "Doji"
+    
     return "None"
 # تحليل العملة وتوليد الإشارة
 def analyze(symbol):
     df = fetch_data(symbol, interval, lookback)
-    if df.empty or len(df) < 20:  
+    if df.empty or len(df) < 20:
         raise Exception("Not enough data to analyze")
-    
+
     df = compute_indicators(df)
     last = df.iloc[-1]
 
+    # الشروط الذكية للإشارة
     signal = "Hold"
-    if last["EMA20"] > last["EMA50"] and last["RSI"] < 70:
+    if last["EMA20"] > last["EMA50"] and last["RSI"] > 40 and last["MACD_Hist"] > 0:
         signal = "Buy ✅"
-    elif last["EMA20"] < last["EMA50"] and last["RSI"] > 30:
+    elif last["EMA20"] < last["EMA50"] and last["RSI"] < 60 and last["MACD_Hist"] < 0:
         signal = "Sell ❌"
 
     pa = detect_price_action(df)
 
+    # حساب وقف الخسارة بناءً على اتجاه الإشارة
     sl = last["close"] - last["ATR"] if signal == "Buy ✅" else last["close"] + last["ATR"]
 
+    # حساب أهداف الربح بناءً على اتجاه الإشارة
     if signal == "Sell ❌":
         tp1 = last["close"] - last["ATR"] * 1.5
         tp2 = last["close"] - last["ATR"] * 2
@@ -156,7 +173,7 @@ def analyze(symbol):
         trade_score += 20
     if last["MACD_Hist"] > 0:
         trade_score += 15
-    if (signal == "Buy ✅" and last["close"] > last["BB_upper"]) or (signal == "Sell ❌" and last["close"] < last["BB_lower"]):
+    if (signal == "Buy ✅" and last["close"] > last["EMA20"]) or (signal == "Sell ❌" and last["close"] < last["EMA20"]):
         trade_score += 15
 
     return {
@@ -172,6 +189,62 @@ def analyze(symbol):
         "risk_pct": auto_risk,
         "score": min(trade_score, 100)
     }, df
+def analyze_all_timeframes(symbol):
+    timeframes = [
+        "1m", "3m", "5m", "15m", "30m",
+        "1h", "2h", "4h", "6h", "12h",
+        "1d", "3d", "1w"
+    ]
+
+    buy_frames = []
+    sell_frames = []
+    hold_frames = []
+
+    for tf in timeframes:
+        try:
+            df = fetch_data(symbol, tf, 100)
+            if df.empty or len(df) < 20:
+                hold_frames.append(tf)
+                continue
+
+            df = compute_indicators(df)
+            last = df.iloc[-1]
+
+            # نفس شروط التحليل الذكي
+            signal = "Hold"
+            if last["EMA20"] > last["EMA50"] and last["RSI"] > 40 and last["MACD_Hist"] > 0:
+                signal = "Buy ✅"
+            elif last["EMA20"] < last["EMA50"] and last["RSI"] < 60 and last["MACD_Hist"] < 0:
+                signal = "Sell ❌"
+
+            if signal == "Buy ✅":
+                buy_frames.append(tf)
+            elif signal == "Sell ❌":
+                sell_frames.append(tf)
+            else:
+                hold_frames.append(tf)
+
+        except Exception as e:
+            hold_frames.append(tf)
+
+    total = len(timeframes)
+    buy_percent = len(buy_frames) / total * 100
+    sell_percent = len(sell_frames) / total * 100
+
+    # عرض النتائج
+    st.subheader(f"Multi-Timeframe Analysis for {symbol}")
+    st.write(f"✅ Buy: {round(buy_percent, 2)}% ({len(buy_frames)} timeframes)")
+    st.write(", ".join(buy_frames))
+
+    st.write(f"❌ Sell: {round(sell_percent, 2)}% ({len(sell_frames)} timeframes)")
+    st.write(", ".join(sell_frames))
+
+    if buy_percent > 70:
+        st.success("Strong Buy Signal across multiple timeframes!")
+    elif sell_percent > 70:
+        st.error("Strong Sell Signal across multiple timeframes!")
+    else:
+        st.warning("No clear trend: Signals are mixed.")
 # زر التحليل وعرض النتائج
 if st.button(TXT["analyze"]):
     results = []
@@ -196,7 +269,10 @@ if st.button(TXT["analyze"]):
 
         except Exception as e:
             st.error(f"Error analyzing {sym}: {e}")
-
+if st.button("Analyze All Timeframes"):
+    for sym in symbols:
+        analyze_all_timeframes(sym)
+        
     # عرض جدول تلخيصي لكل العملات
     if results:
         df_results = pd.DataFrame(results)
