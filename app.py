@@ -42,8 +42,11 @@ leverage = st.selectbox(TXT["leverage"], [1, 2, 5, 10, 20, 50], index=2 if mode 
 def fetch_data(symbol, interval, limit):
     try:
         api_key = st.secrets["BINANCE_API_KEY"]
+        headers = {
+            "X-MBX-APIKEY": api_key,
+            "Accept": "application/json"
+        }
         url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
-        headers = {"X-MBX-APIKEY": api_key}
         response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
         data = response.json()
