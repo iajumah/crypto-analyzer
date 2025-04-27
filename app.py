@@ -1,6 +1,12 @@
 import streamlit as st
 import pandas as pd
+from binance.client import Client
 import requests
+
+# إعداد Binance Client باستخدام Secrets
+api_key = st.secrets["BINANCE_API_KEY"]
+api_secret = st.secrets["BINANCE_API_SECRET"]
+binance_client = Client(api_key, api_secret)
 
 # إعدادات الصفحة
 st.set_page_config(page_title="Crypto Analyzer", layout="wide")
@@ -41,20 +47,11 @@ leverage = st.selectbox(TXT["leverage"], [1, 2, 5, 10, 20, 50], index=2 if mode 
 # دالة تحميل البيانات من Binance
 def fetch_data(symbol, interval, limit):
     try:
-        api_key = st.secrets["BINANCE_API_KEY"]
-        headers = {
-            "X-MBX-APIKEY": api_key,
-            "Accept": "application/json"
-        }
-        url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
-        data = response.json()
+        klines = binance_client.get_klines(symbol=symbol, interval=interval, limit=limit)
+        if not klines:
+            raise Exception("No data returned from Binance API.")
 
-        if not data or len(data) < max(10, limit * 0.5):
-            raise Exception("Not enough candles returned from Binance API.")
-
-        df = pd.DataFrame(data, columns=[
+        df = pd.DataFrame(klines, columns=[
             "time", "open", "high", "low", "close", "volume",
             "close_time", "qav", "trades", "tbbav", "tbqav", "ignore"
         ])
